@@ -160,7 +160,7 @@ services:
       - key: DJANGO_SUPERUSER_USERNAME
         value: "admin"
       - key: DJANGO_SUPERUSER_EMAIL
-        value: "admin@todo: set your email
+        value: "admin@example.com"
       - key: DJANGO_SUPERUSER_PASSWORD
         generateValue: true
 
