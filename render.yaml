@@ -1,0 +1,463 @@
+# Render Blueprint for Plane
+# Deploy with: render blueprint launch --repo https://github.com/openclaw280-cloud/plane
+
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: plane-db
+    plan: starter
+    region: oregon
+    postgresMajorVersion: "15"
+    databaseName: plane
+    user: plane
+    maxConnections: 100
+
+  # Redis (Valkey-compatible)
+  - type: redis
+    name: plane-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+
+  # RabbitMQ - Using a private service since Render doesn't have managed RabbitMQ
+  - type: pserv
+    name: plane-mq
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile.rabbitmq
+    dockerContext: .
+    envVars:
+      - key: RABBITMQ_DEFAULT_USER
+        value: plane
+      - key: RABBITMQ_DEFAULT_PASS
+        generateValue: true
+      - key: RABBITMQ_DEFAULT_VHOST
+        value: plane
+
+  # MinIO / S3 Storage - Using a private service
+  - type: pserv
+    name: plane-minio
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile.minio
+    dockerContext: .
+    envVars:
+      - key: MINIO_ROOT_USER
+        value: plane
+      - key: MINIO_ROOT_PASSWORD
+        generateValue: true
+    disk:
+      name: minio-data
+      mountPath: /export
+      sizeGB: 10
+
+  # API Service (Django)
+  - type: web
+    name: plane-api
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/api/Dockerfile.api
+    dockerContext: ./apps/api
+    healthCheckPath: /api/health/
+    envVars:
+      - key: DEBUG
+        value: "0"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://*.onrender.com"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plane-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: plane-redis
+          type: redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: RABBITMQ_USER
+        value: plane
+      - key: RABBITMQ_PASSWORD
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: envVars.RABBITMQ_DEFAULT_PASS
+      - key: RABBITMQ_VHOST
+        value: plane
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_USER
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_PASSWORD
+      - key: AWS_S3_ENDPOINT_URL
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: host
+          override: "http://{{host}}:9000"
+      - key: AWS_S3_BUCKET_NAME
+        value: "uploads"
+      - key: FILE_SIZE_LIMIT
+        value: "5242880"
+      - key: SIGNED_URL_EXPIRATION
+        value: "3600"
+      - key: USE_MINIO
+        value: "1"
+      - key: WEB_URL
+        fromService:
+          name: plane-api
+          type: web
+          property: host
+          override: "https://{{host}}"
+      - key: GUNICORN_WORKERS
+        value: "2"
+      - key: ADMIN_BASE_URL
+        fromService:
+          name: plane-admin
+          type: web
+          property: host
+          override: "https://{{host}}/god-mode"
+      - key: SPACE_BASE_URL
+        fromService:
+          name: plane-space
+          type: web
+          property: host
+          override: "https://{{host}}/spaces"
+      - key: APP_BASE_URL
+        fromService:
+          name: plane-web
+          type: web
+          property: host
+          override: "https://{{host}}"
+      - key: LIVE_BASE_URL
+        fromService:
+          name: plane-live
+          type: web
+          property: host
+          override: "https://{{host}}/live"
+      - key: LIVE_SERVER_SECRET_KEY
+        generateValue: true
+      - key: HARD_DELETE_AFTER_DAYS
+        value: "60"
+      - key: MINIO_ENDPOINT_SSL
+        value: "0"
+      - key: API_KEY_RATE_LIMIT
+        value: "60/minute"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: "admin"
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: "admin@todo: set your email
+      - key: DJANGO_SUPERUSER_PASSWORD
+        generateValue: true
+
+  # Background Worker (Celery)
+  - type: worker
+    name: plane-worker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/api/Dockerfile.api
+    dockerContext: ./apps/api
+    startCommand: ./bin/docker-entrypoint-worker.sh
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plane-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: plane-redis
+          type: redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: RABBITMQ_USER
+        value: plane
+      - key: RABBITMQ_PASSWORD
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: envVars.RABBITMQ_DEFAULT_PASS
+      - key: RABBITMQ_VHOST
+        value: plane
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_USER
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_PASSWORD
+      - key: AWS_S3_ENDPOINT_URL
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: host
+          override: "http://{{host}}:9000"
+      - key: AWS_S3_BUCKET_NAME
+        value: "uploads"
+      - key: USE_MINIO
+        value: "1"
+      - key: SECRET_KEY
+        fromService:
+          name: plane-api
+          type: web
+          property: envVars.SECRET_KEY
+
+  # Beat Worker (Celery Beat)
+  - type: worker
+    name: plane-beat-worker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/api/Dockerfile.api
+    dockerContext: ./apps/api
+    startCommand: ./bin/docker-entrypoint-beat.sh
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plane-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: plane-redis
+          type: redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: RABBITMQ_USER
+        value: plane
+      - key: RABBITMQ_PASSWORD
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: envVars.RABBITMQ_DEFAULT_PASS
+      - key: RABBITMQ_VHOST
+        value: plane
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_USER
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_PASSWORD
+      - key: AWS_S3_ENDPOINT_URL
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: host
+          override: "http://{{host}}:9000"
+      - key: AWS_S3_BUCKET_NAME
+        value: "uploads"
+      - key: USE_MINIO
+        value: "1"
+      - key: SECRET_KEY
+        fromService:
+          name: plane-api
+          type: web
+          property: envVars.SECRET_KEY
+
+  # Migrator (one-time job for migrations)
+  - type: job
+    name: plane-migrator
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/api/Dockerfile.api
+    dockerContext: ./apps/api
+    startCommand: ./bin/docker-entrypoint-migrator.sh
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plane-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: plane-redis
+          type: redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: RABBITMQ_USER
+        value: plane
+      - key: RABBITMQ_PASSWORD
+        fromService:
+          name: plane-mq
+          type: pserv
+          property: envVars.RABBITMQ_DEFAULT_PASS
+      - key: RABBITMQ_VHOST
+        value: plane
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: AWS_ACCESS_KEY_ID
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_USER
+      - key: AWS_SECRET_ACCESS_KEY
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: envVars.MINIO_ROOT_PASSWORD
+      - key: AWS_S3_ENDPOINT_URL
+        fromService:
+          name: plane-minio
+          type: pserv
+          property: host
+          override: "http://{{host}}:9000"
+      - key: AWS_S3_BUCKET_NAME
+        value: "uploads"
+      - key: USE_MINIO
+        value: "1"
+      - key: SECRET_KEY
+        fromService:
+          name: plane-api
+          type: web
+          property: envVars.SECRET_KEY
+
+  # Web App (Next.js - Main App)
+  - type: web
+    name: plane-web
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/web/Dockerfile.web
+    dockerContext: ./apps/web
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          name: plane-api
+          type: web
+          property: host
+          override: "https://{{host}}"
+      - key: NEXT_PUBLIC_ADMIN_BASE_URL
+        fromService:
+          name: plane-admin
+          type: web
+          property: host
+          override: "https://{{host}}/god-mode"
+      - key: NEXT_PUBLIC_SPACE_BASE_URL
+        fromService:
+          name: plane-space
+          type: web
+          property: host
+          override: "https://{{host}}/spaces"
+      - key: NEXT_PUBLIC_LIVE_BASE_URL
+        fromService:
+          name: plane-live
+          type: web
+          property: host
+          override: "https://{{host}}/live"
+      - key: NEXT_PUBLIC_APP_URL
+        fromService:
+          name: plane-web
+          type: web
+          property: host
+          override: "https://{{host}}"
+
+  # Admin Panel (Next.js)
+  - type: web
+    name: plane-admin
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/admin/Dockerfile.admin
+    dockerContext: ./apps/admin
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          name: plane-api
+          type: web
+          property: host
+          override: "https://{{host}}"
+      - key: NEXT_PUBLIC_APP_URL
+        fromService:
+          name: plane-web
+          type: web
+          property: host
+          override: "https://{{host}}"
+
+  # Space App (Next.js)
+  - type: web
+    name: plane-space
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/space/Dockerfile.space
+    dockerContext: ./apps/space
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          name: plane-api
+          type: web
+          property: host
+          override: "https://{{host}}"
+      - key: NEXT_PUBLIC_APP_URL
+        fromService:
+          name: plane-web
+          type: web
+          property: host
+          override: "https://{{host}}"
+
+  # Live Server (Node.js)
+  - type: web
+    name: plane-live
+    plan: starter
+    region: oregon
+    dockerfilePath: ./apps/live/Dockerfile.live
+    dockerContext: ./apps/live
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: REDIS_URL
+        fromService:
+          name: plane-redis
+          type: redis
+          property: connectionString
+      - key: LIVE_SERVER_SECRET_KEY
+        fromService:
+          name: plane-api
+          type: web
+          property: envVars.LIVE_SERVER_SECRET_KEY
+      - key: API_BASE_URL
+        fromService:
+          name: plane-api
+          type: web
+          property: host
+          override: "https://{{host}}"
