@@ -7,10 +7,6 @@ services:
     name: plane-db
     plan: starter
     region: oregon
-    postgresMajorVersion: "15"
-    databaseName: plane
-    user: plane
-    maxConnections: 100
 
   # Redis (Valkey-compatible)
   - type: redis
