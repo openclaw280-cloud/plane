@@ -1,0 +1,32 @@
+[build]
+builder = "docker"
+
+[[services]]
+name = "plane-web"
+dockerfilePath = "apps/web/Dockerfile.web"
+buildContext = "."
+
+[[services]]
+name = "plane-admin"
+dockerfilePath = "apps/admin/Dockerfile.admin"
+buildContext = "."
+
+[[services]]
+name = "plane-space"
+dockerfilePath = "apps/space/Dockerfile.space"
+buildContext = "."
+
+[[services]]
+name = "plane-api"
+dockerfilePath = "Dockerfile.api"
+buildContext = "apps/api"
+
+[[services]]
+name = "plane-live"
+dockerfilePath = "apps/live/Dockerfile.live"
+buildContext = "."
+
+[[services]]
+name = "plane-proxy"
+dockerfilePath = "Dockerfile.ce"
+buildContext = "apps/proxy"
